@@ -88,4 +88,4 @@ def index():
     return "支付中间服务运行中 - 正常"
 
 if __name__ == '__main__':
-    app.run()
+    app.run(host='0.0.0.0', port=10000)
