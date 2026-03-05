@@ -1,130 +1,81 @@
 from flask import Flask, request, jsonify
-import hmac
-import hashlib
+import uuid
+import threading
+import time
 import requests
-import qrcode
-import io
-import base64
-
-# ===================== 你的信息已全部填好 =====================
-BOT_TOKEN = "8699187838:AAGXy7zTKo1_LJEPD1dhnKekwn03EM07sdo"
-IPN_SECRET = "x9GiujGXpovf0c947GkQWrdgTon9Bxcr"
-PAY_AMOUNT = 15  # 15 USDT
-NOWPAYMENTS_API_KEY = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
-# =================================================================
 
 app = Flask(__name__)
 
-# 1. 用户点开的付款验证页面
-@app.route('/pay/<chat_id>')
-def pay_page(chat_id):
-    try:
-        # 1. 向 NowPayments 创建支付订单
-        response = requests.post(
-            "https://api.nowpayments.io/v1/payment",
-            headers={"x-api-key": NOWPAYMENTS_API_KEY},
-            json={
-                "price_amount": PAY_AMOUNT,
-                "price_currency": "usdt",
-                "pay_currency": "usdt",
-                "order_id": chat_id,
-                "order_description": "MasterJun 金口诀预测服务",
-                "ipn_callback_url": "https://nowpayments-callback.onrender.com/nowpayments-callback"
-            }
-        )
-        payment_data = response.json()
+# 内存记录已付款订单（重启清空，符合你不记人、不留痕逻辑）
+paid_orders = set()
 
-        if response.status_code != 201:
-            return "创建支付失败", 500
+# 你的固定收款链接
+FIXED_PAYMENT_URL = "https://nowpayments.io/payment/?iid=5874033439"
 
-        # 2. 提取收款地址
-        pay_address = payment_data.get("pay_address", "")
-        if not pay_address:
-            return "未获取到收款地址", 500
-
-        # 3. 生成二维码
-        qr = qrcode.make(pay_address)
-        buf = io.BytesIO()
-        qr.save(buf, format="PNG")
-        qr_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-        # 4. 返回带二维码的页面
-        return f"""
-        <html>
-            <head>
-                <meta charset="utf-8">
-                <title>激活服务</title>
-            </head>
-            <body style="text-align:center; font-size:22px; margin-top:60px; font-family: Arial">
-                <h3>请完成支付以激活服务</h3>
-                <p>金额：{PAY_AMOUNT} USDT（TRC20网络）</p >
-                <p>收款地址：{pay_address}</p >
-                < img src="data:image/png;base64,{qr_base64}" style="width:200px; margin:20px auto; display:block;">
-                <p>支付完成后自动激活</p >
-                <br>
-                <p style="font-size:14px; color:#666">
-                    此页面由系统自动生成，仅用于身份验证
-                </p >
-            </body>
-        </html>
-        """
-    except Exception as e:
-        return f"错误: {str(e)}", 500
-
-# 2. NowPayments 回调通知（核心）
-@app.route('/nowpayments-callback', methods=['POST'])
-def nowpayments_callback():
-    try:
-        data = request.get_json()
-        signature = request.headers.get('x-nowpayments-sig')
-
-        if not signature:
-            return "No signature", 403
-
-        # 验证签名
-        computed_sig = hmac.new(
-            IPN_SECRET.encode(),
-            request.get_data(),
-            hashlib.sha512
-        ).hexdigest()
-
-        if computed_sig != signature:
-            return "Invalid signature", 403
-
-        # 从订单号获取用户 chat_id
-        order_id = data.get('order_id', '')
-        amount = data.get('amount', 0)
-
-        if order_id:
-            # 通知用户付款成功
-            msg = f"✅ 支付成功！\n金额：{amount} USDT\n已为您激活服务。"
-            requests.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                json={"chat_id": order_id, "text": msg}
-            )
-
-        return "OK", 200
-
-    except Exception as e:
-        return "Error", 500
-
-# 3. 给扣子机器人调用：生成付款链接
-@app.route('/create-pay-link')
-def create_pay_link():
-    chat_id = request.args.get('chat_id', '')
-    if not chat_id:
-        return jsonify({"error": "missing chat_id"}), 400
-
-    host = request.host
-    pay_link = f"https://{host}/pay/{chat_id}"
-
+# ----------------------
+# 1. 用户激活 → 生成临时订单，跳固定支付链接
+# ----------------------
+@app.route("/activate", methods=["GET"])
+def activate():
+    # 生成一次性订单号（不记录用户身份，只记订单）
+    order_id = "order_" + str(uuid.uuid4())
+    # 拼接：固定支付链接 + 带上订单号
+    pay_url = f"{FIXED_PAYMENT_URL}&orderId={order_id}"
     return jsonify({
-        "pay_link": pay_link
+        "orderId": order_id,
+        "payUrl": pay_url
     })
 
-@app.route('/')
-def index():
-    return "支付中间服务运行中 - 正常"
+# ----------------------
+# 2. NowPayments 回调通知 → 标记订单已付款
+# ----------------------
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.get_json()
+    order_id = data.get("orderId")
+    status = data.get("paymentStatus")  # 一般是 success / failed
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+    if status == "success" and order_id:
+        paid_orders.add(order_id)  # 只标记订单，不记录人
+    return "ok", 200
+
+# ----------------------
+# 3. 机器人验证：这个订单有没有付过？
+# ----------------------
+@app.route("/check", methods=["GET"])
+def check():
+    order_id = request.args.get("orderId")
+    paid = order_id in paid_orders
+    return jsonify({"paid": paid})
+
+# ----------------------
+# 4. 机器人服务完成后，删除订单（一次一用）
+# ----------------------
+@app.route("/consume", methods=["GET"])
+def consume():
+    order_id = request.args.get("orderId")
+    if order_id in paid_orders:
+        paid_orders.remove(order_id)
+    return jsonify({"ok": True})
+
+# ----------------------
+# 5. 防休眠：自己访问自己，永不休眠
+# ----------------------
+def keep_awake():
+    while True:
+        try:
+            # 访问自己的轻量路由，防止休眠
+            requests.get("https://nowpayments-callback.onrender.com/health", timeout=15)
+        except:
+            pass
+        time.sleep(60 * 3)  # 每3分钟访问一次
+
+@app.route("/health", methods=["GET"])
+def health():
+    return "ok", 200
+
+# 启动防休眠线程
+threading.Thread(target=keep_awake, daemon=True).start()
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
