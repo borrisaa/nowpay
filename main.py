@@ -3,59 +3,89 @@ import hmac
 import hashlib
 import requests
 
+# ===================== 你的信息已全部填好 =====================
+BOT_TOKEN = "8699187838:AAGXy7zTKo1_LJEPD1dhnKekwn03EM07sdo"
+IPN_SECRET = "x9GiujGXpovf0c947GkQWrdgTon9Bxcr"
+PAY_AMOUNT = 15  # 15 USDT
+# =================================================================
+
 app = Flask(__name__)
 
-# 从 NowPayments 后台复制的 IPN Secret Key
-IPN_SECRET_KEY = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
-# 你的 Telegram Bot Token
-TELEGRAM_BOT_TOKEN = "8699187838:AAGXy7zTKo1_LJEPD1dhnKekwn03EM07sdo"
-# 你的 Telegram 用户ID（或频道ID），用于接收通知
-TELEGRAM_CHAT_ID = "8404531662"
+# 1. 用户点开的付款验证页面
+@app.route('/pay/<chat_id>')
+def pay_page(chat_id):
+    return f"""
+    <html>
+        <head>
+            <meta charset="utf-8">
+            <title>激活服务</title>
+        </head>
+        <body style="text-align:center; font-size:22px; margin-top:60px; font-family: Arial">
+            <h3>请完成支付以激活服务</h3>
+            <p>金额：{PAY_AMOUNT} USDT</p >
+            <p>支付完成后自动激活</p >
+            <br>
+            <p style="font-size:14px; color:#666">
+                此页面由系统自动生成，仅用于身份验证
+            </p >
+        </body>
+    </html>
+    """
 
-def verify_signature(data, signature):
-    """验证 NowPayments 回调签名"""
-    computed_signature = hmac.new(
-        IPN_SECRET_KEY.encode(),
-        data.encode(),
-        hashlib.sha512
-    ).hexdigest()
-    return hmac.compare_digest(computed_signature, signature)
-
-def send_telegram_notification(message):
-    """向 Telegram 发送通知"""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message
-    }
-    requests.post(url, data=payload)
-
+# 2. NowPayments 回调通知（核心）
 @app.route('/nowpayments-callback', methods=['POST'])
 def nowpayments_callback():
-    # 获取请求体和签名
-    data = request.get_data(as_text=True)
-    signature = request.headers.get('x-nowpayments-sig')
-    
-    # 验证签名
-    if not verify_signature(data, signature):
-        return jsonify({"status": "invalid signature"}), 403
-    
-    # 解析支付数据
-    payment_data = request.json
-    order_id = payment_data.get('order_id')
-    amount = payment_data.get('amount')
-    currency = payment_data.get('currency')
-    status = payment_data.get('payment_status')
-    
-    # 处理支付成功
-    if status == 'finished':
-        message = f"✅ 支付成功！\n订单号: {order_id}\n金额: {amount} {currency}"
-        send_telegram_notification(message)
-        return jsonify({"status": "success"})
-    
-    return jsonify({"status": "received"})
+    try:
+        data = request.get_json()
+        signature = request.headers.get('x-nowpayments-sig')
+
+        if not signature:
+            return "No signature", 403
+
+        # 验证签名
+        computed_sig = hmac.new(
+            IPN_SECRET.encode(),
+            request.get_data(),
+            hashlib.sha512
+        ).hexdigest()
+
+        if computed_sig != signature:
+            return "Invalid signature", 403
+
+        # 从订单号获取用户 chat_id
+        order_id = data.get('order_id', '')
+        amount = data.get('amount', 0)
+
+        if order_id:
+            # 通知用户付款成功
+            msg = f"✅ 支付成功！\n金额：{amount} USDT\n已为您激活服务。"
+            requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json={"chat_id": order_id, "text": msg}
+            )
+
+        return "OK", 200
+
+    except Exception as e:
+        return "Error", 500
+
+# 3. 给扣子机器人调用：生成付款链接
+@app.route('/create-pay-link')
+def create_pay_link():
+    chat_id = request.args.get('chat_id', '')
+    if not chat_id:
+        return jsonify({"error": "missing chat_id"}), 400
+
+    host = request.host
+    pay_link = f"https://{host}/pay/{chat_id}"
+
+    return jsonify({
+        "pay_link": pay_link
+    })
+
+@app.route('/')
+def index():
+    return "支付中间服务运行中 - 正常"
 
 if __name__ == '__main__':
-    import os
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
+    app.run()
