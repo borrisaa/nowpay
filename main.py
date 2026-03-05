@@ -2,11 +2,15 @@ from flask import Flask, request, jsonify
 import hmac
 import hashlib
 import requests
+import qrcode
+import io
+import base64
 
 # ===================== 你的信息已全部填好 =====================
 BOT_TOKEN = "8699187838:AAGXy7zTKo1_LJEPD1dhnKekwn03EM07sdo"
 IPN_SECRET = "x9GiujGXpovf0c947GkQWrdgTon9Bxcr"
 PAY_AMOUNT = 15  # 15 USDT
+NOWPAYMENTS_API_KEY = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
 # =================================================================
 
 app = Flask(__name__)
@@ -14,23 +18,58 @@ app = Flask(__name__)
 # 1. 用户点开的付款验证页面
 @app.route('/pay/<chat_id>')
 def pay_page(chat_id):
-    return f"""
-    <html>
-        <head>
-            <meta charset="utf-8">
-            <title>激活服务</title>
-        </head>
-        <body style="text-align:center; font-size:22px; margin-top:60px; font-family: Arial">
-            <h3>请完成支付以激活服务</h3>
-            <p>金额：{PAY_AMOUNT} USDT</p >
-            <p>支付完成后自动激活</p >
-            <br>
-            <p style="font-size:14px; color:#666">
-                此页面由系统自动生成，仅用于身份验证
-            </p >
-        </body>
-    </html>
-    """
+    try:
+        # 1. 向 NowPayments 创建支付订单
+        response = requests.post(
+            "https://api.nowpayments.io/v1/payment",
+            headers={"x-api-key": NOWPAYMENTS_API_KEY},
+            json={
+                "price_amount": PAY_AMOUNT,
+                "price_currency": "usdt",
+                "pay_currency": "usdt",
+                "order_id": chat_id,
+                "order_description": "MasterJun 金口诀预测服务",
+                "ipn_callback_url": "https://nowpayments-callback.onrender.com/nowpayments-callback"
+            }
+        )
+        payment_data = response.json()
+
+        if response.status_code != 201:
+            return "创建支付失败", 500
+
+        # 2. 提取收款地址
+        pay_address = payment_data.get("pay_address", "")
+        if not pay_address:
+            return "未获取到收款地址", 500
+
+        # 3. 生成二维码
+        qr = qrcode.make(pay_address)
+        buf = io.BytesIO()
+        qr.save(buf, format="PNG")
+        qr_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        # 4. 返回带二维码的页面
+        return f"""
+        <html>
+            <head>
+                <meta charset="utf-8">
+                <title>激活服务</title>
+            </head>
+            <body style="text-align:center; font-size:22px; margin-top:60px; font-family: Arial">
+                <h3>请完成支付以激活服务</h3>
+                <p>金额：{PAY_AMOUNT} USDT（TRC20网络）</p >
+                <p>收款地址：{pay_address}</p >
+                < img src="data:image/png;base64,{qr_base64}" style="width:200px; margin:20px auto; display:block;">
+                <p>支付完成后自动激活</p >
+                <br>
+                <p style="font-size:14px; color:#666">
+                    此页面由系统自动生成，仅用于身份验证
+                </p >
+            </body>
+        </html>
+        """
+    except Exception as e:
+        return f"错误: {str(e)}", 500
 
 # 2. NowPayments 回调通知（核心）
 @app.route('/nowpayments-callback', methods=['POST'])
