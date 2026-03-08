@@ -39,9 +39,10 @@ def webhook():
     data = request.get_json(silent=True) or {}
     print(f"[{datetime.datetime.now()}] 收到回调数据:", data)  # 关键日志
 
-    # 优先取 order_id，如果没有再取 payment_id
-    order_id = data.get("order_id") or data.get("payment_id")
-    status = data.get("status")
+    # 优先取 order_id，如果没有再取 payment_id，最后取 invoice_id
+    order_id = data.get("order_id") or data.get("payment_id") or data.get("invoice_id")
+    # 优先取 status，如果没有再取 payment_status
+    status = data.get("status") or data.get("payment_status")
     print(f"[{datetime.datetime.now()}] 解析结果: order_id={order_id}, status={status}")
 
     # 只要状态是成功类的，就标记为已付款
