@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, redirect
+import datetime
 
 app = Flask(__name__)
 
@@ -36,13 +37,19 @@ def pay_bsc(order_id):
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(silent=True) or {}
-    order_id = data.get("orderId")
-    status = data.get("paymentStatus")
+    print(f"[{datetime.datetime.now()}] 收到回调数据:", data)  # 关键日志
 
-    if order_id and status == "success":
-        paid_orders.add(order_id)
+    # 优先取 order_id，如果没有再取 payment_id
+    order_id = data.get("order_id") or data.get("payment_id")
+    status = data.get("status")
+    print(f"[{datetime.datetime.now()}] 解析结果: order_id={order_id}, status={status}")
 
-    return "ok"
+    # 只要状态是成功类的，就标记为已付款
+    if order_id and status in ["confirmed", "finished", "success"]:
+        paid_orders.add(str(order_id))  # 确保是字符串
+        print(f"[{datetime.datetime.now()}] 标记订单 {order_id} 为已付款")
+
+    return "ok", 200
 
 # ----------------------
 # 3. 检查订单是否已付款
@@ -50,9 +57,9 @@ def webhook():
 @app.route("/check", methods=["GET"])
 def check():
     order_id = request.args.get("orderId")
-    return jsonify({
-        "paid": order_id in paid_orders
-    })
+    is_paid = order_id in paid_orders
+    print(f"[{datetime.datetime.now()}] 检查订单 {order_id}: paid={is_paid}")
+    return jsonify({"paid": is_paid})
 
 # ----------------------
 # 4. 用完一次就销毁订单
@@ -62,6 +69,7 @@ def consume():
     order_id = request.args.get("orderId")
     if order_id in paid_orders:
         paid_orders.remove(order_id)
+        print(f"[{datetime.datetime.now()}] 销毁订单 {order_id}")
     return jsonify({"ok": True})
 
 # ----------------------
@@ -72,4 +80,5 @@ def health():
     return "ok"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    # 关键：端口改为 10000，适配 Render
+    app.run(host="0.0.0.0", port=10000)
