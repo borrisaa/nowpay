@@ -32,30 +32,34 @@ def pay_bsc(order_id):
     return redirect(pay_url)
 
 # ----------------------
-# NowPayments 回调（核心：优先取 payment_id，这是唯一 100% 能拿到的字段）
+# NowPayments 回调（修复版：先看原始数据，再解析）
 # ----------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
+    # 🔥 1. 先打印「原始请求体」，不管是什么格式，都能看到
+    print(f"[{datetime.datetime.now()}] 原始请求体:", request.get_data())
+    
+    # 🔥 2. 再尝试解析 JSON（解析失败也不报错）
     data = request.get_json(silent=True) or {}
-    print(f"[{datetime.datetime.now()}] 收到完整回调数据:", data) # 打印完整数据，方便调试
+    print(f"[{datetime.datetime.now()}] 解析后 JSON 数据:", data)
 
-    # 🔥 核心逻辑：优先取 NowPayments 自己的 payment_id（这是唯一 100% 能拿到的字段）
+    # 🔥 3. 识别所有可能的「订单号/Payment ID」字段（NowPayments 兼容版）
     order_id = (
         data.get("payment_id") 
         or data.get("orderId")
         or data.get("order_id")
         or data.get("id")
         or data.get("invoice_id")
-        or str(data.get("payment"))
+        or str(data.get("payment", {}).get("id"))  # NowPayments 常见结构：payment.id
         or data.get("metadata", {}).get("order_id")
     )
     
-    # 🔥 识别所有可能的成功状态
+    # 🔥 4. 识别所有可能的成功状态
     status = data.get("status") or data.get("payment_status")
 
     print(f"识别到的订单号: {order_id}, 状态: {status}")
 
-    # 如果有订单号且状态是成功/完成
+    # 🔥 5. 成功则标记为已付款
     if order_id and status in ["confirmed", "finished", "success", "completed", "paid"]:
         paid_orders.add(str(order_id))
         print(f"[{datetime.datetime.now()}] ✅ 订单 {order_id} 已成功标记为已付款！")
