@@ -32,36 +32,43 @@ def pay_bsc(order_id):
     return redirect(pay_url)
 
 # ----------------------
-# NowPayments 回调（已兼容所有字段名）
+# NowPayments 回调（已兼容所有字段名 + 全状态识别）
 # ----------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(silent=True) or {}
-    print(f"[{datetime.datetime.now()}] 收到回调:", data)
+    print(f"[{datetime.datetime.now()}] 收到完整回调数据:", data) # 打印完整数据，方便调试
 
-    # 兼容 NowPayments 所有可能的订单号字段名
+    # 🔥 兼容 NowPayments 所有可能的订单号字段名（终极版）
     order_id = (
         data.get("order_id") 
         or data.get("orderId")
         or data.get("payment_id") 
         or data.get("invoice_id")
+        or data.get("id")
+        or str(data.get("payment"))
         or data.get("metadata", {}).get("order_id")
     )
+    
+    # 🔥 识别所有可能的成功状态（NowPayments 常用状态全覆盖）
     status = data.get("status") or data.get("payment_status")
 
-    if order_id and status in ["confirmed", "finished", "success"]:
+    print(f"识别到的订单号: {order_id}, 状态: {status}")
+
+    # 如果有订单号且状态是成功/完成
+    if order_id and status in ["confirmed", "finished", "success", "completed", "paid"]:
         paid_orders.add(str(order_id))
-        print(f"[{datetime.datetime.now()}] 订单 {order_id} 已付款")
+        print(f"[{datetime.datetime.now()}] ✅ 订单 {order_id} 已成功标记为已付款！")
 
     return "ok", 200
 
 # ----------------------
-# 查询支付状态
+# 查询支付状态（修复类型匹配问题）
 # ----------------------
 @app.route("/check", methods=["GET"])
 def check():
-    order_id = request.args.get("orderId")
-    is_paid = order_id in paid_orders
+    order_id = request.args.get("orderId") or request.args.get("order_id")
+    is_paid = str(order_id) in paid_orders # 强制转成字符串，避免类型不匹配
     return jsonify({"paid": is_paid})
 
 # ----------------------
@@ -69,7 +76,7 @@ def check():
 # ----------------------
 @app.route("/consume", methods=["GET"])
 def consume():
-    order_id = request.args.get("orderId")
+    order_id = request.args.get("orderId") or request.args.get("order_id")
     if order_id in paid_orders:
         paid_orders.remove(order_id)
     return jsonify({"ok": True})
@@ -82,4 +89,4 @@ def health():
     return "ok"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(host="0.0.0.0", port=10000, debug=False)
