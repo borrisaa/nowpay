@@ -27,9 +27,8 @@ NOWPAYMENTS_API_SECRET = "x9GiujGXpovf0c947GkQWrdgTon9Bxcr"
 @app.route("/pay/<int:order_id>", methods=["GET"])
 def pay(order_id):
     order_id_str = str(order_id)
-    # 把客户订单号拼到支付链接里，让 NOWPayments 回调时带回来
-    pay_url = f"{FIXED_PAY_URL}&orderId={order_id_str}&callback_url={CALLBACK_URL}"
-    # 预占映射位（防止重复生成）
+    # 关键修改：把 orderId 换成 payin_extra_id，NowPayments 不会吃掉
+    pay_url = f"{FIXED_PAY_URL}&payin_extra_id={order_id_str}&callback_url={CALLBACK_URL}"
     if order_id_str not in order_to_payment:
         order_to_payment[order_id_str] = None
     return redirect(pay_url)
@@ -40,7 +39,8 @@ def pay(order_id):
 @app.route("/pay_bsc/<int:order_id>", methods=["GET"])
 def pay_bsc(order_id):
     order_id_str = str(order_id)
-    pay_url = f"{FIXED_PAY_URL_BSC}&orderId={order_id_str}&callback_url={CALLBACK_URL}"
+    # 关键修改：把 orderId 换成 payin_extra_id
+    pay_url = f"{FIXED_PAY_URL_BSC}&payin_extra_id={order_id_str}&callback_url={CALLBACK_URL}"
     if order_id_str not in order_to_payment:
         order_to_payment[order_id_str] = None
     return redirect(pay_url)
@@ -73,9 +73,9 @@ def webhook():
     data = request.get_json(silent=True) or {}
     print(f"[{now}] 回调JSON: {data}", flush=True)
 
-    # 提取关键信息
+    # 提取关键信息：优先取 payin_extra_id（新订单），兼容旧订单的 order_id
     payment_id = str(data.get("payment_id") or data.get("payment", {}).get("id"))
-    client_order_id = data.get("orderId") or data.get("order_id")  # 这就是客户看到的订单号
+    client_order_id = data.get("payin_extra_id") or data.get("orderId") or data.get("order_id") or ""
     status = data.get("status") or data.get("payment_status")
 
     print(f"[{now}] 客户订单号: {client_order_id}, payment_id: {payment_id}, 状态: {status}", flush=True)
