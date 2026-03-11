@@ -5,14 +5,17 @@ import hashlib
 
 app = Flask(__name__)
 
+# 你的配置（保持不变）
 NOWPAYMENTS_API_KEY = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
 NOWPAYMENTS_IPN_SECRET = "x9GiujGXpovf0c947GkQWrdgTon9Bxcr"
 
+# 映射：payment_id → 你的订单号
 payment_to_order = {}
+# 已支付的业务订单号
 paid_orders = set()
 
 # --------------------------
-# 统一支付入口（去掉 allowed_coins）
+# 统一支付入口：15 USDT 收款，纯 USDT 流程
 # --------------------------
 @app.route("/pay/<string:order_id>")
 def create_payment(order_id):
@@ -21,11 +24,10 @@ def create_payment(order_id):
         "Content-Type": "application/json"
     }
     payload = {
-        "price_amount": 15,
-        "price_currency": "usd",
-        "order_id": order_id,
-        # ✅ 只传 pay_currency，NowPayments 自动分配通道
-        "pay_currency": "usdt"
+        "price_amount": 15,       # ✅ 金额：15 USDT
+        "price_currency": "usdt", # ✅ 计价货币：USDT
+        "pay_currency": "usdt",   # ✅ 收款货币：USDT
+        "order_id": order_id     # 你的 8 位订单号
     }
     resp = requests.post(
         "https://api.nowpayments.io/v1/payment",
@@ -60,7 +62,7 @@ def webhook():
     return "OK"
 
 # --------------------------
-# 查询接口（用户输订单号）
+# 查询接口：用户输 8 位订单号
 # --------------------------
 @app.route("/check")
 def check_order():
