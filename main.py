@@ -10,7 +10,7 @@ app = Flask(__name__)
 paid_orders = set()
 order_to_payment = {}
 
-# 你真实密钥（100%准确）
+# 你真实的密钥
 NOWPAYMENTS_API_KEY = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
 NOWPAYMENTS_IPN_SECRET = "x9GiujGXpovf0c947GkQWrdgTon9Bxcr"
 CALLBACK_URL = "http://121.41.42.32:10000/webhook"
@@ -38,8 +38,8 @@ def pay(order_id):
             pay_url = resp.json()["payment_url"]
             order_to_payment[order_id_str] = None
             return redirect(pay_url)
-    except:
-        pass
+    except Exception as e:
+        print(f"TRX 错误: {e}", flush=True)
     return "支付链接创建失败", 500
 
 # ----------------------
@@ -65,20 +65,18 @@ def pay_bsc(order_id):
             pay_url = resp.json()["payment_url"]
             order_to_payment[order_id_str] = None
             return redirect(pay_url)
-    except:
-        pass
+    except Exception as e:
+        print(f"BSC 错误: {e}", flush=True)
     return "支付链接创建失败", 500
 
 # ----------------------
-# 回调验签（正确用 IPN Secret）
+# IPN 回调（和你之前一样）
 # ----------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
     raw_data = request.get_data()
     signature = request.headers.get("X-NowPayments-Signature", "")
-
-    # 验签只用 IPN Secret
-    computed_sig = hmac.new(
+    computed_hmac = hmac.new(
         NOWPAYMENTS_IPN_SECRET.encode("utf-8"),
         raw_data,
         hashlib.sha512
@@ -90,35 +88,25 @@ def webhook():
     status = data.get("status") or data.get("payment_status") or ""
 
     if client_order_id and payment_id:
-        order_to_payment[client_order_id] = payment_id
-
+        order_to_payment[str(client_order_id)] = payment_id
     if payment_id and status in ["finished", "confirmed", "success", "paid", "completed"]:
         paid_orders.add(payment_id)
-
     return "ok"
 
 # ----------------------
-# 机器人查询接口
+# 机器人查询接口（完全不变）
 # ----------------------
 @app.route("/check", methods=["GET"])
 def check():
     order_id = request.args.get("orderId") or ""
     if not order_id:
         return jsonify({"paid": False})
-    pid = order_to_payment.get(order_id)
+    pid = order_to_payment.get(str(order_id))
     return jsonify({"paid": pid in paid_orders})
 
 # ----------------------
-# 激活销毁订单
+# 健康检查
 # ----------------------
-@app.route("/consume", methods=["GET"])
-def consume():
-    order_id = request.args.get("orderId") or ""
-    pid = order_to_payment.get(order_id)
-    if pid and pid in paid_orders:
-        paid_orders.remove(pid)
-    return jsonify({"ok": True})
-
 @app.route("/health")
 def health():
     return "ok"
