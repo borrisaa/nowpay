@@ -15,8 +15,8 @@ FIXED_PAY_URL_BSC = "https://nowpayments.io/payment/?iid=5845644542"
 # 服务器回调地址（核心，自动回调）
 CALLBACK_URL = "http://121.41.42.32:10000/webhook"
 
-# 这里填你 NowPayments 后台的 API Secret
-NOWPAYMENTS_API_SECRET = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
+# 这里填你 NowPayments 后台的 IPN Secret（不是 API Key！）
+NOWPAYMENTS_API_SECRET = "x9GiujGXpovf0c947GkQWrdgTon9Bxcr"
 
 # ----------------------
 # TRX 支付入口
@@ -72,7 +72,8 @@ def webhook():
         or str(data.get("payment", {}).get("id"))
     )
 
-    status = data.get("status")
+    # 兼容 NOWPayments 状态字段（payment_status / status）
+    status = data.get("status") or data.get("payment_status")
 
     print(f"[{now}] 订单号: {order_id}, 状态: {status}", flush=True)
 
@@ -98,8 +99,8 @@ def check():
 @app.route("/consume", methods=["GET"])
 def consume():
     order_id = request.args.get("orderId") or request.args.get("order_id")
-    if order_id in paid_orders:
-        paid_orders.remove(order_id)
+    if order_id and str(order_id) in paid_orders:
+        paid_orders.remove(str(order_id))
     return jsonify({"ok": True})
 
 # ----------------------
