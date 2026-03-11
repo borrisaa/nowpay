@@ -1,6 +1,4 @@
 from flask import Flask, request, jsonify, redirect
-import hmac
-import hashlib
 import requests
 
 app = Flask(__name__)
@@ -8,8 +6,8 @@ app = Flask(__name__)
 paid_orders = set()
 order_map = {}
 
-# 替换成你的 NowPayments API Key
-NOWPAYMENTS_API_KEY = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH79"
+# 你提供的正确密钥
+NOWPAYMENTS_API_KEY = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
 NOWPAYMENTS_IPN_SECRET = "x9GiujGXpovf0c947GkQWrdgTon9Bxcr"
 
 # 统一支付入口（用户只需要这一个链接）
@@ -23,7 +21,7 @@ def create_payment(order_id):
     data = {
         "price_amount": 15,
         "price_currency": "usd",
-        "pay_currency": "usdtbsc",  # 默认 BSC，用户支付页可切换
+        "pay_currency": "usdtbsc",  # 默认 BSC，支付页可切换
         "order_id": order_id_str
     }
     try:
@@ -39,15 +37,16 @@ def create_payment(order_id):
             if purchase_id:
                 order_map[order_id_str] = res
                 pay_url = f"https://nowpayments.io/payment/?iid={purchase_id}"
-                print(f"[INFO] 订单 {order_id_str} 生成支付链接: {pay_url}", flush=True)
                 return redirect(pay_url)
             else:
-                print(f"[ERROR] 订单 {order_id_str} API 返回 purchase_id 为空: {res}", flush=True)
+                print(f"[ERROR] 订单 {order_id_str} purchase_id 为空: {res}", flush=True)
+        else:
+            print(f"[ERROR] 订单 {order_id_str} API 返回 {resp.status_code}: {resp.text}", flush=True)
     except Exception as e:
         print(f"[ERROR] 订单 {order_id_str} 创建支付失败: {str(e)}", flush=True)
     return "Payment link failed", 500
 
-# IPN 回调（NowPayments 后台填写：http://你的服务器IP:10000/ipn）
+# IPN 回调（NowPayments 后台填写：http://121.41.42.32:10000/ipn）
 @app.route("/ipn", methods=["POST"])
 def ipn_handler():
     try:
@@ -66,8 +65,7 @@ def ipn_handler():
 @app.route("/check", methods=["GET"])
 def check_order():
     order_id = request.args.get("orderId")
-    paid = order_id in paid_orders
-    return jsonify({"paid": paid, "order_id": order_id})
+    return jsonify({"paid": order_id in paid_orders})
 
 # 健康检查
 @app.route("/health")
