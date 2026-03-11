@@ -15,6 +15,9 @@ FIXED_PAY_URL_BSC = "https://nowpayments.io/payment/?iid=5845644542"
 # 服务器回调地址（核心，自动回调）
 CALLBACK_URL = "http://121.41.42.32:10000/webhook"
 
+# 这里填你 NowPayments 后台的 API Secret
+NOWPAYMENTS_API_SECRET = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
+
 # ----------------------
 # TRX 支付入口
 # ----------------------
@@ -34,54 +37,49 @@ def pay_bsc(order_id):
     return redirect(pay_url)
 
 # ----------------------
-# NowPayments 回调（最终版：验证签名 + 识别订单）
+# NowPayments 回调（最终版：能正确匹配订单）
 # ----------------------
-# 🔥 替换成你在 NowPayments 后台的 API Secret
-NOWPAYMENTS_API_SECRET = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
-
 @app.route("/webhook", methods=["POST"])
 def webhook():
     now = datetime.datetime.now()
-    print(f"[{now}] 👉 收到回调请求", flush=True)
 
-    # 1. 读取请求头与原始数据
     signature = request.headers.get("X-NowPayments-Signature", "")
     raw_data = request.get_data()
-    print(f"[{now}] 👉 回调签名: {signature}", flush=True)
-    print(f"[{now}] 👉 回调原始字节: {raw_data}", flush=True)
 
-    # 2. 验证 HMAC 签名（NowPayments 官方要求）
+    # 强制输出日志，不缓冲
+    print(f"[{now}] 收到回调", flush=True)
+    print(f"[{now}] 回调签名: {signature}", flush=True)
+    print(f"[{now}] 原始数据: {raw_data}", flush=True)
+
+    # 验签
     computed_hmac = hmac.new(
         NOWPAYMENTS_API_SECRET.encode("utf-8"),
         raw_data,
         hashlib.sha512
     ).hexdigest()
-    print(f"[{now}] 👉 计算签名: {computed_hmac}", flush=True)
-    print(f"[{now}] 👉 签名验证结果: {computed_hmac == signature}", flush=True)
 
-    # 3. 解析 JSON 回调数据
+    print(f"[{now}] 计算签名: {computed_hmac}", flush=True)
+    print(f"[{now}] 验签结果: {computed_hmac == signature}", flush=True)
+
     data = request.get_json(silent=True) or {}
-    print(f"[{now}] 👉 解析后 JSON: {data}", flush=True)
+    print(f"[{now}] 回调JSON: {data}", flush=True)
 
-    # 4. 多路径匹配 Payment ID（兼容 NowPayments 各种返回格式）
+    # 自动匹配你传的 orderId 和平台返回的 payment_id
     order_id = (
-        data.get("payment_id")
-        or data.get("orderId")
+        data.get("orderId")
         or data.get("order_id")
-        or data.get("id")
-        or data.get("invoice_id")
+        or data.get("payment_id")
         or str(data.get("payment", {}).get("id"))
-        or data.get("metadata", {}).get("order_id")
     )
 
-    # 5. 识别支付状态
-    status = data.get("status") or data.get("payment_status")
-    print(f"[{now}] 👉 识别到订单号: {order_id}, 状态: {status}", flush=True)
+    status = data.get("status")
 
-    # 6. 标记为已付款
-    if order_id and status in ["confirmed", "finished", "success", "completed", "paid"]:
+    print(f"[{now}] 订单号: {order_id}, 状态: {status}", flush=True)
+
+    # 支付成功就标记
+    if order_id and status in ["finished", "confirmed", "success", "paid", "completed"]:
         paid_orders.add(str(order_id))
-        print(f"[{now}] ✅ 订单 {order_id} 已成功标记为已付款！", flush=True)
+        print(f"[{now}] ✅ 订单 {order_id} 已标记付款成功", flush=True)
 
     return "ok", 200
 
@@ -113,4 +111,3 @@ def health():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000, debug=False)
-
