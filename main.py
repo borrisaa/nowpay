@@ -8,11 +8,10 @@ order_map = {}
 
 # 你的正确密钥
 NOWPAYMENTS_API_KEY = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
-NOWPAYMENTS_IPN_SECRET = "x9GiujGXpovf0c947GkQWrdgTon9Bxcr"
 
-# 统一支付入口（放开币种限制，NowPayments 自动加载所有支持币种）
-@app.route("/pay/<int:order_id>", methods=["GET"])
-def create_payment(order_id):
+# TRX 链 USDT 支付入口（NowPayments 标准代码：usdttrc20）
+@app.route("/pay_trx/<int:order_id>", methods=["GET"])
+def create_payment_trx(order_id):
     order_id_str = str(order_id)
     headers = {
         "x-api-key": NOWPAYMENTS_API_KEY,
@@ -20,7 +19,8 @@ def create_payment(order_id):
     }
     data = {
         "price_amount": 15,
-        "price_currency": "usd",  # 只限定法币，不限定加密币种
+        "price_currency": "usd",
+        "pay_currency": "usdttrc20",  # 必须传，NowPayments 识别的 TRC20 USDT 代码
         "order_id": order_id_str
     }
     try:
@@ -28,24 +28,58 @@ def create_payment(order_id):
             "https://api.nowpayments.io/v1/payment",
             headers=headers,
             json=data,
-            timeout=15
+            timeout=20
         )
-        if resp.status_code in (200, 201):
+        if resp.status_code == 201:
             res = resp.json()
-            purchase_id = res.get("purchase_id")
-            if purchase_id:
-                order_map[order_id_str] = res
-                pay_url = f"https://nowpayments.io/payment/?iid={purchase_id}"
+            payment_id = res.get("payment_id")
+            if payment_id:
+                pay_url = f"https://nowpayments.io/payment/?iid={payment_id}"
                 return redirect(pay_url)
             else:
-                print(f"[ERROR] 订单 {order_id_str} purchase_id 为空: {res}", flush=True)
+                print(f"[ERROR TRX] 订单 {order_id_str} 未拿到 payment_id: {res}", flush=True)
         else:
-            print(f"[ERROR] 订单 {order_id_str} API 返回 {resp.status_code}: {resp.text}", flush=True)
+            print(f"[ERROR TRX] 订单 {order_id_str} API 返回 {resp.status_code}: {resp.text}", flush=True)
     except Exception as e:
-        print(f"[ERROR] 订单 {order_id_str} 创建支付失败: {str(e)}", flush=True)
+        print(f"[ERROR TRX] 订单 {order_id_str} 请求异常: {str(e)}", flush=True)
     return "Payment link failed", 500
 
-# IPN 回调
+# BSC 链 USDT 支付入口（NowPayments 标准代码：usdtbsc）
+@app.route("/pay_bsc/<int:order_id>", methods=["GET"])
+def create_payment_bsc(order_id):
+    order_id_str = str(order_id)
+    headers = {
+        "x-api-key": NOWPAYMENTS_API_KEY,
+        "Content-Type": "application/json"
+    }
+    data = {
+        "price_amount": 15,
+        "price_currency": "usd",
+        "pay_currency": "usdtbsc",    # 必须传，NowPayments 识别的 BEP20 USDT 代码
+        "order_id": order_id_str
+    }
+    try:
+        resp = requests.post(
+            "https://api.nowpayments.io/v1/payment",
+            headers=headers,
+            json=data,
+            timeout=20
+        )
+        if resp.status_code == 201:
+            res = resp.json()
+            payment_id = res.get("payment_id")
+            if payment_id:
+                pay_url = f"https://nowpayments.io/payment/?iid={payment_id}"
+                return redirect(pay_url)
+            else:
+                print(f"[ERROR BSC] 订单 {order_id_str} 未拿到 payment_id: {res}", flush=True)
+        else:
+            print(f"[ERROR BSC] 订单 {order_id_str} API 返回 {resp.status_code}: {resp.text}", flush=True)
+    except Exception as e:
+        print(f"[ERROR BSC] 订单 {order_id_str} 请求异常: {str(e)}", flush=True)
+    return "Payment link failed", 500
+
+# IPN 回调（可选，后面再配）
 @app.route("/ipn", methods=["POST"])
 def ipn_handler():
     try:
