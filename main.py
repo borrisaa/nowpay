@@ -3,28 +3,27 @@ import datetime
 
 app = Flask(__name__)
 
-# 内存订单（重启清空，完全符合你要的简单模式）
+# 内存订单（重启清空，简单模式）
 paid_orders = set()
 
-# 你自己在 NowPayments 后台生成的固定支付链接
+# 你自己的 NowPayments 固定支付链接（保持不变）
 FIXED_PAY_URL = "https://nowpayments.io/payment/?iid=5874033439"
 FIXED_PAY_URL_BSC = "https://nowpayments.io/payment/?iid=5845644542"
 
-# 新增：你的服务器回调地址（核心！自动回调全靠它）
+# 服务器回调地址（核心，自动回调）
 CALLBACK_URL = "http://121.41.42.32:10000/webhook"
 
 # ----------------------
-# TRX 支付入口（已加 callback_url）
+# TRX 支付入口
 # ----------------------
 @app.route("/pay/<int:order_id>", methods=["GET"])
 def pay(order_id):
     order_id_str = str(order_id)
-    # 关键：拼接 callback_url，让 NowPayments 自动发回调
     pay_url = f"{FIXED_PAY_URL}&orderId={order_id_str}&callback_url={CALLBACK_URL}"
     return redirect(pay_url)
 
 # ----------------------
-# BSC 支付入口（已加 callback_url）
+# BSC 支付入口
 # ----------------------
 @app.route("/pay_bsc/<int:order_id>", methods=["GET"])
 def pay_bsc(order_id):
@@ -33,14 +32,21 @@ def pay_bsc(order_id):
     return redirect(pay_url)
 
 # ----------------------
-# NowPayments 回调（完全不变，兼容你现有逻辑）
+# NowPayments 回调（已兼容所有字段名）
 # ----------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(silent=True) or {}
     print(f"[{datetime.datetime.now()}] 收到回调:", data)
 
-    order_id = data.get("order_id") or data.get("payment_id") or data.get("invoice_id")
+    # 兼容 NowPayments 所有可能的订单号字段名
+    order_id = (
+        data.get("order_id") 
+        or data.get("orderId")
+        or data.get("payment_id") 
+        or data.get("invoice_id")
+        or data.get("metadata", {}).get("order_id")
+    )
     status = data.get("status") or data.get("payment_status")
 
     if order_id and status in ["confirmed", "finished", "success"]:
@@ -50,7 +56,7 @@ def webhook():
     return "ok", 200
 
 # ----------------------
-# 查询是否付款（完全不变）
+# 查询支付状态
 # ----------------------
 @app.route("/check", methods=["GET"])
 def check():
@@ -59,7 +65,7 @@ def check():
     return jsonify({"paid": is_paid})
 
 # ----------------------
-# 销毁订单（激活后用，完全不变）
+# 激活后销毁订单
 # ----------------------
 @app.route("/consume", methods=["GET"])
 def consume():
@@ -69,7 +75,7 @@ def consume():
     return jsonify({"ok": True})
 
 # ----------------------
-# 健康检查（完全不变）
+# 健康检查
 # ----------------------
 @app.route("/health", methods=["GET"])
 def health():
