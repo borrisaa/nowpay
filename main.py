@@ -26,7 +26,7 @@ def pay(order_id):
     data = {
         "price_amount": 15,
         "price_currency": "usd",
-        "pay_currency": "usdt_trx",
+        "pay_currency": "usdtt",  # TRX 链 USDT，无下划线
         "order_id": order_id_str
     }
     try:
@@ -58,7 +58,7 @@ def pay_bsc(order_id):
     data = {
         "price_amount": 15,
         "price_currency": "usd",
-        "pay_currency": "usdt_bsc",
+        "pay_currency": "usdtbsc",  # BSC 链 USDT，无下划线
         "order_id": order_id_str
     }
     try:
