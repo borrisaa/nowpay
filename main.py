@@ -32,25 +32,25 @@ def pay_bsc(order_id):
     return redirect(pay_url)
 
 # ----------------------
-# NowPayments 回调（已兼容所有字段名 + 全状态识别）
+# NowPayments 回调（核心：优先取 payment_id，这是唯一 100% 能拿到的字段）
 # ----------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(silent=True) or {}
     print(f"[{datetime.datetime.now()}] 收到完整回调数据:", data) # 打印完整数据，方便调试
 
-    # 🔥 兼容 NowPayments 所有可能的订单号字段名（终极版）
+    # 🔥 核心逻辑：优先取 NowPayments 自己的 payment_id（这是唯一 100% 能拿到的字段）
     order_id = (
-        data.get("order_id") 
+        data.get("payment_id") 
         or data.get("orderId")
-        or data.get("payment_id") 
-        or data.get("invoice_id")
+        or data.get("order_id")
         or data.get("id")
+        or data.get("invoice_id")
         or str(data.get("payment"))
         or data.get("metadata", {}).get("order_id")
     )
     
-    # 🔥 识别所有可能的成功状态（NowPayments 常用状态全覆盖）
+    # 🔥 识别所有可能的成功状态
     status = data.get("status") or data.get("payment_status")
 
     print(f"识别到的订单号: {order_id}, 状态: {status}")
