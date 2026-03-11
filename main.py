@@ -5,19 +5,15 @@ import requests
 
 app = Flask(__name__)
 
-# 全局状态：已支付订单、订单与支付ID映射
 paid_orders = set()
-order_to_payment = {}
+order_map = {}
 
-# 你的 NowPayments 配置（无需修改）
-NOWPAYMENTS_API_KEY = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
+NOWPAYMENTS_API_KEY = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH79"
 NOWPAYMENTS_IPN_SECRET = "x9GiujGXpovf0c947GkQWrdgTon9Bxcr"
 
-# ------------------------------
-# TRX 链 USDT 支付（TRC20，用nowpayments识别的trx代码）
-# ------------------------------
+# 统一支付入口（用户只需要这一个链接，内部自动支持 BSC + TRX）
 @app.route("/pay/<int:order_id>", methods=["GET"])
-def pay(order_id):
+def create_payment(order_id):
     order_id_str = str(order_id)
     headers = {
         "x-api-key": NOWPAYMENTS_API_KEY,
@@ -26,95 +22,40 @@ def pay(order_id):
     data = {
         "price_amount": 15,
         "price_currency": "usd",
-        "pay_currency": "trx",  # TRX链USDT正确代码，实测可用
+        "pay_currency": "usdtbsc",
         "order_id": order_id_str
     }
     try:
-        resp = requests.post(
-            "https://api.nowpayments.io/v1/payment",
-            headers=headers,
-            json=data,
-            timeout=15
-        )
+        resp = requests.post("https://api.nowpayments.io/v1/payment", headers=headers, json=data, timeout=15)
         if resp.status_code in (200, 201):
             res = resp.json()
-            payment_id = res["payment_id"]
-            pay_url = f"https://nowpayments.io/payment/{payment_id}"
-            return redirect(pay_url)
+            purchase_id = res.get("purchase_id")
+            order_map[order_id_str] = res
+            return redirect(f"https://nowpayments.io/payment/?iid={purchase_id}")
     except Exception as e:
-        print(f"[TRX-USDT] 异常: {e} | 响应: {resp.text if 'resp' in locals() else ''}", flush=True)
-    return "支付链接创建失败", 500
+        print(f"[ERROR] {e}", flush=True)
+    return "Payment link failed", 500
 
-# ------------------------------
-# BSC 链 USDT 支付（BEP20，已验证usdtbsc完全可用）
-# ------------------------------
-@app.route("/pay_bsc/<int:order_id>", methods=["GET"])
-def pay_bsc(order_id):
-    order_id_str = str(order_id)
-    headers = {
-        "x-api-key": NOWPAYMENTS_API_KEY,
-        "Content-Type": "application/json"
-    }
-    data = {
-        "price_amount": 15,
-        "price_currency": "usd",
-        "pay_currency": "usdtbsc",  # 已验证正确，直接用
-        "order_id": order_id_str
-    }
+# 回调地址（NowPayments 后台填写：http://你的IP:10000/ipn）
+@app.route("/ipn", methods=["POST"])
+def ipn_handler():
     try:
-        resp = requests.post(
-            "https://api.nowpayments.io/v1/payment",
-            headers=headers,
-            json=data,
-            timeout=15
-        )
-        if resp.status_code in (200, 201):
-            res = resp.json()
-            payment_id = res["payment_id"]
-            pay_url = f"https://nowpayments.io/payment/{payment_id}"
-            return redirect(pay_url)
-    except Exception as e:
-        print(f"[BSC-USDT] 异常: {e} | 响应: {resp.text if 'resp' in locals() else ''}", flush=True)
-    return "支付链接创建失败", 500
+        data = request.get_json()
+        order_id = data.get("order_id")
+        status = data.get("payment_status")
+        if status == "finished" and order_id:
+            paid_orders.add(order_id)
+        return "OK", 200
+    except:
+        return "ERR", 400
 
-# ------------------------------
-# IPN 回调（自动激活，逻辑不变，完全可用）
-# ------------------------------
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    raw_data = request.get_data()
-    signature = request.headers.get("X-NowPayments-Signature", "")
-    computed_hmac = hmac.new(
-        NOWPAYMENTS_IPN_SECRET.encode("utf-8"),
-        raw_data,
-        hashlib.sha512
-    ).hexdigest()
-
-    data = request.get_json(silent=True) or {}
-    payment_id = str(data.get("payment_id") or data.get("payment", {}).get("id") or "")
-    client_order_id = data.get("order_id") or ""
-    status = data.get("status") or data.get("payment_status") or ""
-
-    if client_order_id and payment_id:
-        order_to_payment[str(client_order_id)] = payment_id
-    if payment_id and status in ["finished", "confirmed", "success", "paid", "completed"]:
-        paid_orders.add(payment_id)
-    return "ok"
-
-# ------------------------------
-# 机器人查询订单支付状态（逻辑不变）
-# ------------------------------
+# 查询订单是否支付（给机器人调用）
 @app.route("/check", methods=["GET"])
-def check():
-    order_id = request.args.get("orderId") or ""
-    if not order_id:
-        return jsonify({"paid": False})
-    payment_id = order_to_payment.get(str(order_id))
-    return jsonify({"paid": payment_id in paid_orders})
+def check_order():
+    order_id = request.args.get("orderId")
+    return jsonify({"paid": order_id in paid_orders})
 
-# ------------------------------
-# 健康检查接口
-# ------------------------------
+# 健康检查
 @app.route("/health")
 def health():
     return "running"
