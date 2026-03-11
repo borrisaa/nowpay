@@ -8,10 +8,11 @@ app = Flask(__name__)
 paid_orders = set()
 order_map = {}
 
+# 替换成你的 NowPayments API Key
 NOWPAYMENTS_API_KEY = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH79"
 NOWPAYMENTS_IPN_SECRET = "x9GiujGXpovf0c947GkQWrdgTon9Bxcr"
 
-# 统一支付入口（用户只需要这一个链接，内部自动支持 BSC + TRX）
+# 统一支付入口（用户只需要这一个链接）
 @app.route("/pay/<int:order_id>", methods=["GET"])
 def create_payment(order_id):
     order_id_str = str(order_id)
@@ -22,21 +23,31 @@ def create_payment(order_id):
     data = {
         "price_amount": 15,
         "price_currency": "usd",
-        "pay_currency": "usdtbsc",
+        "pay_currency": "usdtbsc",  # 默认 BSC，用户支付页可切换
         "order_id": order_id_str
     }
     try:
-        resp = requests.post("https://api.nowpayments.io/v1/payment", headers=headers, json=data, timeout=15)
+        resp = requests.post(
+            "https://api.nowpayments.io/v1/payment",
+            headers=headers,
+            json=data,
+            timeout=15
+        )
         if resp.status_code in (200, 201):
             res = resp.json()
             purchase_id = res.get("purchase_id")
-            order_map[order_id_str] = res
-            return redirect(f"https://nowpayments.io/payment/?iid={purchase_id}")
+            if purchase_id:
+                order_map[order_id_str] = res
+                pay_url = f"https://nowpayments.io/payment/?iid={purchase_id}"
+                print(f"[INFO] 订单 {order_id_str} 生成支付链接: {pay_url}", flush=True)
+                return redirect(pay_url)
+            else:
+                print(f"[ERROR] 订单 {order_id_str} API 返回 purchase_id 为空: {res}", flush=True)
     except Exception as e:
-        print(f"[ERROR] {e}", flush=True)
+        print(f"[ERROR] 订单 {order_id_str} 创建支付失败: {str(e)}", flush=True)
     return "Payment link failed", 500
 
-# 回调地址（NowPayments 后台填写：http://你的IP:10000/ipn）
+# IPN 回调（NowPayments 后台填写：http://你的服务器IP:10000/ipn）
 @app.route("/ipn", methods=["POST"])
 def ipn_handler():
     try:
@@ -45,15 +56,18 @@ def ipn_handler():
         status = data.get("payment_status")
         if status == "finished" and order_id:
             paid_orders.add(order_id)
+            print(f"[INFO] 订单 {order_id} 支付成功", flush=True)
         return "OK", 200
-    except:
+    except Exception as e:
+        print(f"[ERROR] IPN 处理失败: {str(e)}", flush=True)
         return "ERR", 400
 
-# 查询订单是否支付（给机器人调用）
+# 机器人查询支付状态接口
 @app.route("/check", methods=["GET"])
 def check_order():
     order_id = request.args.get("orderId")
-    return jsonify({"paid": order_id in paid_orders})
+    paid = order_id in paid_orders
+    return jsonify({"paid": paid, "order_id": order_id})
 
 # 健康检查
 @app.route("/health")
