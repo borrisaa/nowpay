@@ -1,15 +1,17 @@
 from flask import Flask, request, jsonify, redirect
 import requests
+import hashlib
+import hmac
 
 app = Flask(__name__)
 
 paid_orders = set()
-order_map = {}
 
-# 你的正确密钥
+# 你的配置（和后台一致）
 NOWPAYMENTS_API_KEY = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
+NOWPAYMENTS_IPN_SECRET = "x9GiujGXpovf0c947GkQWrdgTon9Bxcr"  # 对应后台的 IPN secret key
 
-# TRX 链 USDT 支付入口（NowPayments 标准代码：usdttrc20）
+# TRX 链 USDT 支付入口
 @app.route("/pay_trx/<int:order_id>", methods=["GET"])
 def create_payment_trx(order_id):
     order_id_str = str(order_id)
@@ -20,7 +22,7 @@ def create_payment_trx(order_id):
     data = {
         "price_amount": 15,
         "price_currency": "usd",
-        "pay_currency": "usdttrc20",  # 必须传，NowPayments 识别的 TRC20 USDT 代码
+        "pay_currency": "usdttrc20",
         "order_id": order_id_str
     }
     try:
@@ -44,7 +46,7 @@ def create_payment_trx(order_id):
         print(f"[ERROR TRX] 订单 {order_id_str} 请求异常: {str(e)}", flush=True)
     return "Payment link failed", 500
 
-# BSC 链 USDT 支付入口（NowPayments 标准代码：usdtbsc）
+# BSC 链 USDT 支付入口
 @app.route("/pay_bsc/<int:order_id>", methods=["GET"])
 def create_payment_bsc(order_id):
     order_id_str = str(order_id)
@@ -55,7 +57,7 @@ def create_payment_bsc(order_id):
     data = {
         "price_amount": 15,
         "price_currency": "usd",
-        "pay_currency": "usdtbsc",    # 必须传，NowPayments 识别的 BEP20 USDT 代码
+        "pay_currency": "usdtbsc",
         "order_id": order_id_str
     }
     try:
@@ -79,20 +81,36 @@ def create_payment_bsc(order_id):
         print(f"[ERROR BSC] 订单 {order_id_str} 请求异常: {str(e)}", flush=True)
     return "Payment link failed", 500
 
-# IPN 回调（可选，后面再配）
-@app.route("/ipn", methods=["POST"])
-def ipn_handler():
+# ✅ 关键修改：接口名从 /ipn 改成 /webhook，和后台完全一致
+@app.route("/webhook", methods=["POST"])
+def webhook_handler():
     try:
+        raw_data = request.get_data()
+        signature = request.headers.get("x-nowpayments-sig")
+        
+        # 签名验证（必须，防止伪造）
+        computed_sig = hmac.new(
+            NOWPAYMENTS_IPN_SECRET.encode(),
+            raw_data,
+            hashlib.sha512
+        ).hexdigest()
+        if not hmac.compare_digest(computed_sig, signature):
+            return "Invalid signature", 403
+        
         data = request.get_json()
         order_id = data.get("order_id")
         status = data.get("payment_status")
+        
         if status == "finished" and order_id:
             paid_orders.add(order_id)
+            print(f"[Webhook] 订单 {order_id} 支付成功", flush=True)
+        
         return "OK", 200
-    except:
-        return "ERR", 400
+    except Exception as e:
+        print(f"[Webhook] 错误: {str(e)}", flush=True)
+        return "Error", 500
 
-# 机器人查询接口
+# 机器人查询订单状态
 @app.route("/check", methods=["GET"])
 def check_order():
     order_id = request.args.get("orderId")
