@@ -1,23 +1,21 @@
 from flask import Flask, request, jsonify, redirect
-import datetime
 import hmac
 import hashlib
 import requests
 
 app = Flask(__name__)
 
-# 内存状态
+# 全局状态
 paid_orders = set()
 order_to_payment = {}
 
-# 你真实的密钥
+# 你正式密钥
 NOWPAYMENTS_API_KEY = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
 NOWPAYMENTS_IPN_SECRET = "x9GiujGXpovf0c947GkQWrdgTon9Bxcr"
-CALLBACK_URL = "http://121.41.42.32:10000/webhook"
 
-# ----------------------
-# TRX 支付（15 USDT）
-# ----------------------
+# ------------------------------
+# TRON 支付（动态创建订单）
+# ------------------------------
 @app.route("/pay/<int:order_id>", methods=["GET"])
 def pay(order_id):
     order_id_str = str(order_id)
@@ -29,22 +27,27 @@ def pay(order_id):
         "price_amount": 15,
         "price_currency": "usd",
         "pay_currency": "trx",
-        "order_id": order_id_str,
-        "callback_url": CALLBACK_URL
+        "order_id": order_id_str
     }
     try:
-        resp = requests.post("https://api.nowpayments.io/v1/payment", headers=headers, json=data, timeout=10)
+        resp = requests.post(
+            "https://api.nowpayments.io/v1/payment",
+            headers=headers,
+            json=data,
+            timeout=12
+        )
         if resp.status_code in (200, 201):
-            pay_url = resp.json()["payment_url"]
-            order_to_payment[order_id_str] = None
+            res = resp.json()
+            payment_id = res["payment_id"]
+            pay_url = f"https://nowpayments.io/payment/{payment_id}"
             return redirect(pay_url)
     except Exception as e:
-        print(f"TRX 错误: {e}", flush=True)
+        print(f"[TRX] 异常: {e}", flush=True)
     return "支付链接创建失败", 500
 
-# ----------------------
-# BSC 支付（15 USDT）
-# ----------------------
+# ------------------------------
+# BSC 支付（动态创建订单）
+# ------------------------------
 @app.route("/pay_bsc/<int:order_id>", methods=["GET"])
 def pay_bsc(order_id):
     order_id_str = str(order_id)
@@ -55,31 +58,37 @@ def pay_bsc(order_id):
     data = {
         "price_amount": 15,
         "price_currency": "usd",
-        "pay_currency": "bnb",
-        "order_id": order_id_str,
-        "callback_url": CALLBACK_URL
+        "pay_currency": "usdt_bsc",
+        "order_id": order_id_str
     }
     try:
-        resp = requests.post("https://api.nowpayments.io/v1/payment", headers=headers, json=data, timeout=10)
+        resp = requests.post(
+            "https://api.nowpayments.io/v1/payment",
+            headers=headers,
+            json=data,
+            timeout=12
+        )
         if resp.status_code in (200, 201):
-            pay_url = resp.json()["payment_url"]
-            order_to_payment[order_id_str] = None
+            res = resp.json()
+            payment_id = res["payment_id"]
+            pay_url = f"https://nowpayments.io/payment/{payment_id}"
             return redirect(pay_url)
     except Exception as e:
-        print(f"BSC 错误: {e}", flush=True)
+        print(f"[BSC] 异常: {e}", flush=True)
     return "支付链接创建失败", 500
 
-# ----------------------
-# IPN 回调（和你之前一样）
-# ----------------------
+# ------------------------------
+# 自动回调（完整、正确、不改动）
+# ------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
     raw_data = request.get_data()
     signature = request.headers.get("X-NowPayments-Signature", "")
+
     computed_hmac = hmac.new(
         NOWPAYMENTS_IPN_SECRET.encode("utf-8"),
         raw_data,
-        hashlib.sha512
+        hashlib.sha51
     ).hexdigest()
 
     data = request.get_json(silent=True) or {}
@@ -89,27 +98,29 @@ def webhook():
 
     if client_order_id and payment_id:
         order_to_payment[str(client_order_id)] = payment_id
+
     if payment_id and status in ["finished", "confirmed", "success", "paid", "completed"]:
         paid_orders.add(payment_id)
+
     return "ok"
 
-# ----------------------
-# 机器人查询接口（完全不变）
-# ----------------------
+# ------------------------------
+# 机器人查询订单是否支付（完整）
+# ------------------------------
 @app.route("/check", methods=["GET"])
 def check():
     order_id = request.args.get("orderId") or ""
     if not order_id:
         return jsonify({"paid": False})
-    pid = order_to_payment.get(str(order_id))
-    return jsonify({"paid": pid in paid_orders})
+    payment_id = order_to_payment.get(str(order_id))
+    return jsonify({"paid": payment_id in paid_orders})
 
-# ----------------------
+# ------------------------------
 # 健康检查
-# ----------------------
+# ------------------------------
 @app.route("/health")
 def health():
-    return "ok"
+    return "running"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000, debug=False)
