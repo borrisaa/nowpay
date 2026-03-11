@@ -9,11 +9,13 @@ app = Flask(__name__)
 NOWPAYMENTS_API_KEY = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
 NOWPAYMENTS_IPN_SECRET = "x9GiujGXpovf0c947GkQWrdgTon9Bxcr"
 
-# 已支付的 payment_id（和用户看到的 Payment ID 一致）
-paid_payments = set()
+# 映射：payment_id → 你的业务订单号
+payment_to_order = {}
+# 已支付的业务订单号
+paid_orders = set()
 
 # --------------------------
-# 统一支付入口（机器人只需要这一个）
+# 统一支付入口（用户点这个链接）
 # --------------------------
 @app.route("/pay/<string:order_id>")
 def create_payment(order_id):
@@ -25,7 +27,6 @@ def create_payment(order_id):
         "price_amount": 15,
         "price_currency": "usd",
         "order_id": order_id,
-        # 只允许所有 USDT 通道，用户打开后自己选
         "allowed_coins": ["usdttrc20", "usdtbsc", "usdteth", "usdtarb", "usdtopt"]
     }
     try:
@@ -39,6 +40,8 @@ def create_payment(order_id):
         if resp.status_code in (200, 201):
             payment_id = data.get("payment_id")
             if payment_id:
+                # 关键：把 NowPayments 的 payment_id 和你的订单号绑定
+                payment_to_order[payment_id] = order_id
                 return redirect(f"https://nowpayments.io/payment/?iid={payment_id}")
         print(f"[Pay] {order_id} {resp.status_code} {resp.text}", flush=True)
     except Exception as e:
@@ -46,35 +49,42 @@ def create_payment(order_id):
     return "Payment failed", 500
 
 # --------------------------
-# 回调接口（和后台 Webhook 一致）
+# 回调接口（NowPayments 调用）
 # --------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
         raw_data = request.get_data()
         signature = request.headers.get("x-nowpayments-sig", "")
-        calc_sig = hmac.new(NOWPAYMENTS_IPN_SECRET.encode(), raw_data, hashlib.sha512).hexdigest()
+        calc_sig = hmac.new(
+            NOWPAYMENTS_IPN_SECRET.encode(),
+            raw_data,
+            hashlib.sha512
+        ).hexdigest()
         if not hmac.compare_digest(calc_sig, signature):
             return "Invalid signature", 403
 
         data = request.get_json()
         payment_id = data.get("payment_id")
         status = data.get("payment_status")
-        if payment_id and status == "finished":
-            paid_payments.add(payment_id)
-            print(f"[Webhook] Payment {payment_id} paid", flush=True)
+
+        # 关键：通过 payment_id 找到你的订单号
+        order_id = payment_to_order.get(payment_id)
+        if order_id and status == "finished":
+            paid_orders.add(order_id)
+            print(f"[Webhook] 订单 {order_id} 支付成功", flush=True)
         return "OK"
     except Exception as e:
         print(f"[Webhook] {e}", flush=True)
         return "Error"
 
 # --------------------------
-# 用户查询：输入 Payment ID
+# 用户查询：只需要输入自己的订单号！
 # --------------------------
 @app.route("/check")
-def check():
-    payment_id = request.args.get("paymentId")
-    return jsonify({"paid": payment_id in paid_payments})
+def check_order():
+    order_id = request.args.get("orderId")  # 用回 orderId，和你原来一致
+    return jsonify({"paid": order_id in paid_orders})
 
 # --------------------------
 # 健康检查
