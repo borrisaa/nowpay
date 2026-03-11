@@ -5,16 +5,16 @@ import requests
 
 app = Flask(__name__)
 
-# 全局状态
+# 全局状态：已支付订单、订单与支付ID映射
 paid_orders = set()
 order_to_payment = {}
 
-# 你正式密钥
+# 你的 NowPayments 配置
 NOWPAYMENTS_API_KEY = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
 NOWPAYMENTS_IPN_SECRET = "x9GiujGXpovf0c947GkQWrdgTon9Bxcr"
 
 # ------------------------------
-# TRON 支付（动态创建订单）
+# TRX 链 USDT 支付（TRC20）
 # ------------------------------
 @app.route("/pay/<int:order_id>", methods=["GET"])
 def pay(order_id):
@@ -26,7 +26,7 @@ def pay(order_id):
     data = {
         "price_amount": 15,
         "price_currency": "usd",
-        "pay_currency": "trx",
+        "pay_currency": "usdt_trx",
         "order_id": order_id_str
     }
     try:
@@ -34,7 +34,7 @@ def pay(order_id):
             "https://api.nowpayments.io/v1/payment",
             headers=headers,
             json=data,
-            timeout=12
+            timeout=15
         )
         if resp.status_code in (200, 201):
             res = resp.json()
@@ -42,11 +42,11 @@ def pay(order_id):
             pay_url = f"https://nowpayments.io/payment/{payment_id}"
             return redirect(pay_url)
     except Exception as e:
-        print(f"[TRX] 异常: {e}", flush=True)
+        print(f"[TRX-USDT] 异常: {e} | 响应: {resp.text if 'resp' in locals() else ''}", flush=True)
     return "支付链接创建失败", 500
 
 # ------------------------------
-# BSC 支付（动态创建订单）
+# BSC 链 USDT 支付（BEP20）
 # ------------------------------
 @app.route("/pay_bsc/<int:order_id>", methods=["GET"])
 def pay_bsc(order_id):
@@ -66,7 +66,7 @@ def pay_bsc(order_id):
             "https://api.nowpayments.io/v1/payment",
             headers=headers,
             json=data,
-            timeout=12
+            timeout=15
         )
         if resp.status_code in (200, 201):
             res = resp.json()
@@ -74,21 +74,20 @@ def pay_bsc(order_id):
             pay_url = f"https://nowpayments.io/payment/{payment_id}"
             return redirect(pay_url)
     except Exception as e:
-        print(f"[BSC] 异常: {e}", flush=True)
+        print(f"[BSC-USDT] 异常: {e} | 响应: {resp.text if 'resp' in locals() else ''}", flush=True)
     return "支付链接创建失败", 500
 
 # ------------------------------
-# 自动回调（完整、正确、不改动）
+# IPN 回调（自动激活）
 # ------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
     raw_data = request.get_data()
     signature = request.headers.get("X-NowPayments-Signature", "")
-
     computed_hmac = hmac.new(
         NOWPAYMENTS_IPN_SECRET.encode("utf-8"),
         raw_data,
-        hashlib.sha51
+        hashlib.sha512
     ).hexdigest()
 
     data = request.get_json(silent=True) or {}
@@ -98,14 +97,12 @@ def webhook():
 
     if client_order_id and payment_id:
         order_to_payment[str(client_order_id)] = payment_id
-
     if payment_id and status in ["finished", "confirmed", "success", "paid", "completed"]:
         paid_orders.add(payment_id)
-
     return "ok"
 
 # ------------------------------
-# 机器人查询订单是否支付（完整）
+# 机器人查询订单支付状态
 # ------------------------------
 @app.route("/check", methods=["GET"])
 def check():
@@ -116,7 +113,7 @@ def check():
     return jsonify({"paid": payment_id in paid_orders})
 
 # ------------------------------
-# 健康检查
+# 健康检查接口
 # ------------------------------
 @app.route("/health")
 def health():
