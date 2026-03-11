@@ -37,7 +37,7 @@ def pay_bsc(order_id):
 # NowPayments 回调（最终版：验证签名 + 识别订单）
 # ----------------------
 # 🔥 替换成你在 NowPayments 后台的 API Secret
-NOWPAYMENTS_API_SECRET = "你的_NowPayments_API_Secret"
+NOWPAYMENTS_API_SECRET = "QBT21RV-SWQ4J79-KQNZD1P-QNSYH77"
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -113,3 +113,4 @@ def health():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000, debug=False)
+
